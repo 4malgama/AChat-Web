@@ -9,6 +9,7 @@ builder.Services.AddSingleton(new ChatOptions
     Endpoint = builder.Configuration["AChat:Endpoint"] ?? "wss://localhost:8080/ws"
 });
 builder.Services.AddScoped<AChatSession>();
+builder.Services.AddScoped<BrowserFileDownloads>();
 builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 

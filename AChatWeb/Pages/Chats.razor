@@ -1,43 +1,161 @@
 @page "/chats"
-@implements IDisposable
+@page "/chats/{ChatId:long}"
+@implements IAsyncDisposable
 @inject AChatSession Session
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
-<PageTitle>Чаты — AChat</PageTitle>
+<PageTitle>@(CurrentChat is { } titleChat ? $"{titleChat.Name} — AChat" : "Чаты — AChat")</PageTitle>
 
-@if (Session.IsAuthenticated && Session.User is { } user)
+@if (Session.IsAuthenticated)
 {
-    <section class="chat-shell" aria-label="Чаты">
+    <section class="chat-shell messaging-shell @(ChatId is > 0 ? "has-open-chat" : "")" aria-label="Чаты">
         <ChatSidebar />
-        <div class="chat-welcome">
-            <div class="workspace-eyebrow"><span class="small-dot"></span> ВАШЕ ПРОСТРАНСТВО</div>
-            <div class="chat-empty-state">
-                <div class="success-illustration" aria-hidden="true"><Icon Name="message" /><span><Icon Name="check" /></span></div>
-                <div class="eyebrow">С ПОДКЛЮЧЕНИЕМ</div>
-                <h1>Вы в AChat<span>.</span></h1>
-                <p>Рады видеть вас, <strong>@user.DisplayName</strong>.</p>
-                <p class="empty-description">Аккаунт подключён. Переписка появится здесь в следующем обновлении.</p>
-                <div class="account-confirmation"><span class="status-dot"></span> Вход выполнен <span class="confirmation-divider">/</span> <span>@("@" + user.Login)</span></div>
-            </div>
-            <div class="workspace-footer"><Icon Name="shield" /> Соединение защищено</div>
+        <div class="conversation-workspace">
+            @if (CurrentChat is { } chat)
+            {
+                var history = Session.History(chat.Id);
+                <header class="conversation-header">
+                    <NavLink href="/chats" class="icon-button conversation-back" aria-label="Назад к списку чатов"><Icon Name="back" /></NavLink>
+                    <AvatarView Source="@chat.Participant?.AvatarDataUrl" Name="@chat.Name" Class="header-avatar" />
+                    <div class="conversation-heading"><h1 dir="auto">@chat.Name</h1>
+                        @if (!string.IsNullOrWhiteSpace(chat.Participant?.Post)) { <p dir="auto">@chat.Participant.Post</p> }
+                        else { <p>@(chat.IsGroup ? "Групповой чат" : "Личная переписка")</p> }
+                    </div>
+                    <button class="icon-button" type="button" disabled="@history.IsLoading" @onclick="Reload"
+                            aria-label="Обновить историю сообщений" title="Обновить историю сообщений"><Icon Name="refresh" Class="@(history.IsLoading ? "rotating" : "")" /></button>
+                </header>
+                @if (history.Error is { } historyError)
+                {
+                    <div class="history-error" role="alert"><Icon Name="alert" /><span>@historyError</span>
+                        <button class="text-button" type="button" disabled="@history.IsLoading" @onclick="Reload">Повторить</button></div>
+                }
+                <div class="message-scroll" @ref="messageScroller" aria-label="История сообщений" aria-busy="@history.IsLoading">
+                    @if (history.IsLoading && history.Messages.Count == 0)
+                    {
+                        <div class="history-empty" role="status"><span class="spinner"></span><h2>Загружаем переписку</h2><p>Сообщения скоро появятся здесь.</p></div>
+                    }
+                    else if (history.IsLoaded && history.Messages.Count == 0)
+                    {
+                        <div class="history-empty"><span class="empty-message-icon"><Icon Name="message" /></span><h2>Пока тихо</h2><p>В этом чате ещё нет сообщений.</p></div>
+                    }
+                    else
+                    {
+                        string? previousDate = null;
+                        @foreach (var message in history.Messages)
+                        {
+                            string day = ChatPresentation.Date(message.UnixTime);
+                            @if (day != previousDate)
+                            {
+                                <div class="message-date"><span>@day</span></div>
+                                previousDate = day;
+                            }
+                            bool own = message.Sender.Id == Session.User!.Id;
+                            <article @key="message.Id" class="message-row @(own ? "outgoing" : "incoming")">
+                                <div class="message-bubble">
+                                    <div class="message-author" dir="auto">@(own ? "Вы" : message.Sender.Name)</div>
+                                    @if (message.Text.Length > 0) { <p class="message-text" dir="auto">@message.Text</p> }
+                                    @if (message.Attachments.Count > 0)
+                                    {
+                                        <div class="message-attachments">
+                                            @foreach (var file in message.Attachments)
+                                            {
+                                                <AttachmentDownload @key="file.Id" ChatId="@chat.Id" File="@file" />
+                                            }
+                                        </div>
+                                    }
+                                    <div class="message-meta"><time title="@ChatPresentation.FullTime(message.UnixTime)">@ChatPresentation.Time(message.UnixTime)</time></div>
+                                </div>
+                            </article>
+                        }
+                    }
+                </div>
+                <footer class="conversation-footer">
+                    <span><Icon Name="shield" /> Просмотр переписки</span>
+                    @if (history.Messages.Count > 0) { <button type="button" class="text-button" @onclick="ScrollToEnd">К последнему сообщению <Icon Name="down" /></button> }
+                </footer>
+            }
+            else
+            {
+                <div class="conversation-start">
+                    <div class="workspace-eyebrow"><span class="small-dot"></span> ВАШЕ ПРОСТРАНСТВО</div>
+                    <div class="conversation-start-content">
+                        <span class="chat-start-icon"><Icon Name="message" /></span>
+                        <div class="eyebrow">БЛИЖЕ ДРУГ К ДРУГУ</div>
+                        <h1>@(ChatId is > 0 && Session.ChatsLoaded ? "Чат недоступен" : "Ваши разговоры")<span>.</span></h1>
+                        <p>@(ChatId is > 0 && Session.ChatsLoaded ? "Выберите другой диалог в списке." : "Выберите чат слева, чтобы открыть переписку.")</p>
+                        <span class="conversation-hint"><Icon Name="file" /> Вложения можно скачать прямо из сообщения</span>
+                        <NavLink href="/chats" class="secondary-button mobile-chat-list">К списку чатов</NavLink>
+                    </div>
+                    <div class="workspace-footer"><Icon Name="shield" /> Соединение защищено</div>
+                </div>
+            }
         </div>
     </section>
     <footer class="page-footer"><span>AChat Web</span><span>На связи с теми, кто важен.</span></footer>
 }
 
 @code {
+    [Parameter] public long? ChatId { get; set; }
     private bool disposed;
+    private int routeVersion;
+    private ElementReference messageScroller;
+    private Task<IJSObjectReference>? module;
+    private ChatSummary? CurrentChat => ChatId is > 0 ? Session.FindChat((ulong)ChatId.Value) : null;
+
     protected override void OnInitialized() => Session.Changed += OnChanged;
-    protected override Task OnAfterRenderAsync(bool firstRender)
+    protected override async Task OnParametersSetAsync()
     {
-        if (!Session.IsAuthenticated) Navigation.NavigateTo("/login", replace: true);
-        return Task.CompletedTask;
+        int route = ++routeVersion;
+        if (!Session.IsAuthenticated) return;
+        Session.SelectChat(ChatId is > 0 ? (ulong)ChatId.Value : null);
+        await Session.WaitForChatsAsync();
+        if (!disposed && route == routeVersion && CurrentChat is { } chat)
+            await Session.LoadMessagesAsync(chat.Id, reload: true);
     }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!Session.IsAuthenticated) { Navigation.NavigateTo("/login", replace: true); return; }
+        if (CurrentChat is { } chat)
+        {
+            try
+            {
+                var js = await GetModule();
+                if (!disposed && CurrentChat?.Id == chat.Id)
+                    await js.InvokeVoidAsync("syncScroll", messageScroller, chat.Id.ToString(), Session.History(chat.Id).Revision);
+            }
+            catch (JSException) { /* Scrolling must not prevent reading the conversation. */ }
+        }
+    }
+    private Task<IJSObjectReference> GetModule() => module ??= JS.InvokeAsync<IJSObjectReference>("import", "./js/chat.js").AsTask();
+    private async Task Reload() { if (CurrentChat is { } chat) await Session.LoadMessagesAsync(chat.Id, reload: true); }
+    private async Task ScrollToEnd() { if (CurrentChat is not null) await (await GetModule()).InvokeVoidAsync("scrollToEnd", messageScroller); }
     private void OnChanged() => _ = InvokeAsync(() =>
     {
         if (disposed) return;
         if (!Session.IsAuthenticated) Navigation.NavigateTo("/login", replace: true);
-        else StateHasChanged();
+        else
+        {
+            StateHasChanged();
+            // The list may arrive after its initial timeout, or after a manual retry.
+            if (CurrentChat is { } chat)
+            {
+                var history = Session.History(chat.Id);
+                if (!history.IsLoaded && !history.IsLoading && history.Error is null)
+                    _ = Session.LoadMessagesAsync(chat.Id);
+            }
+        }
     });
-    public void Dispose() { disposed = true; Session.Changed -= OnChanged; }
+    public async ValueTask DisposeAsync()
+    {
+        disposed = true;
+        routeVersion++;
+        Session.Changed -= OnChanged;
+        Session.SelectChat(null);
+        if (module is not null)
+        {
+            try { await (await module).DisposeAsync(); }
+            catch (JSDisconnectedException) { }
+        }
+    }
 }

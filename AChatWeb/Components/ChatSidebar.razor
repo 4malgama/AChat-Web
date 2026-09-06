@@ -3,8 +3,44 @@
 @inject NavigationManager Navigation
 
 <aside class="chat-sidebar">
-    <div class="sidebar-title"><NavLink href="/chats" class="sidebar-heading"><Icon Name="message" /><span>Чаты</span></NavLink></div>
-    <div class="sidebar-placeholder"><Icon Name="message" /><p>Здесь будут<br />ваши разговоры</p></div>
+    <div class="sidebar-title">
+        <NavLink href="/chats" class="sidebar-heading"><Icon Name="message" /><span>Чаты</span></NavLink>
+        @if (Session.ChatsLoaded) { <span class="chat-count">@Session.Chats.Count</span> }
+        <button class="icon-button sidebar-refresh" type="button" title="Обновить список чатов" aria-label="Обновить список чатов"
+                disabled="@Session.IsRefreshingChats" @onclick="Refresh">
+            <Icon Name="refresh" Class="@(Session.IsRefreshingChats ? "rotating" : "")" />
+        </button>
+    </div>
+    <div class="chat-list-area">
+        <label class="chat-filter"><Icon Name="search" /><input type="search" placeholder="Найти чат" aria-label="Найти в списке чатов"
+                @bind="filter" @bind:event="oninput" /></label>
+        @if (Session.ChatsError is { } error)
+        {
+            <div class="chat-list-error" role="alert"><Icon Name="alert" /><p>@error</p><button type="button" class="text-button" @onclick="Refresh" disabled="@Session.IsRefreshingChats">Повторить</button></div>
+        }
+        else if (!Session.ChatsLoaded)
+        {
+            <div class="chat-list-loading" role="status"><span class="spinner"></span><span>Загружаем чаты…</span></div>
+        }
+        <nav class="conversation-list" aria-label="Список чатов">
+            @foreach (var chat in FilteredChats)
+            {
+                <NavLink @key="chat.Id" href="@($"/chats/{chat.Id}")" class="conversation-row" activeClass="selected" Match="NavLinkMatch.All">
+                    <AvatarView Source="@chat.Participant?.AvatarDataUrl" Name="@chat.Name" Class="conversation-avatar" />
+                    <span class="conversation-copy">
+                        <strong dir="auto">@chat.Name</strong>
+                        @if (!string.IsNullOrWhiteSpace(chat.Participant?.Post)) { <span class="conversation-post" dir="auto">@chat.Participant.Post</span> }
+                        <span class="conversation-preview" dir="auto">@Session.ChatPreview(chat.Id)</span>
+                    </span>
+                    @if (Session.UnreadCount(chat.Id) > 0) { <span class="unread-count" aria-label="Новые сообщения">@Session.UnreadCount(chat.Id)</span> }
+                </NavLink>
+            }
+            @if (Session.ChatsLoaded && !FilteredChats.Any())
+            {
+                <div class="chat-list-empty"><Icon Name="message" /><strong>@(filter.Length > 0 ? "Ничего не найдено" : "Пока нет чатов")</strong><p>@(filter.Length > 0 ? "Попробуйте другое имя." : "Здесь появятся ваши разговоры.")</p></div>
+            }
+        </nav>
+    </div>
     @if (Session.User is { } user)
     {
         <div class="account-bar">
@@ -19,8 +55,17 @@
 
 @code {
     private bool disposed;
-    protected override void OnInitialized() => Session.Changed += OnChanged;
+    private string filter = "";
+    private IEnumerable<ChatSummary> FilteredChats => Session.Chats.Where(c =>
+        c.Name.Contains(filter.Trim(), StringComparison.CurrentCultureIgnoreCase)
+        || (c.Participant?.Post.Contains(filter.Trim(), StringComparison.CurrentCultureIgnoreCase) ?? false));
+    protected override async Task OnInitializedAsync()
+    {
+        Session.Changed += OnChanged;
+        await Session.WaitForChatsAsync();
+    }
     private void OnChanged() => _ = InvokeAsync(() => { if (!disposed) StateHasChanged(); });
+    private async Task Refresh() => await Session.RefreshChatsAsync();
     private async Task Logout() { await Session.LogoutAsync(); Navigation.NavigateTo("/login", replace: true); }
     public void Dispose() { disposed = true; Session.Changed -= OnChanged; }
 }

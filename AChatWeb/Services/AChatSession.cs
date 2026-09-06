@@ -7,7 +7,7 @@ namespace AChatWeb.Services;
 /// <summary>One connection per browser tab. Credentials are never written to storage or logs.</summary>
 public sealed partial class AChatSession(ChatOptions options) : IAsyncDisposable
 {
-    private ClientWebSocket? socket;
+    private WebSocket? socket;
     private CancellationTokenSource? lifetime;
     private Task? receiveTask;
     private TaskCompletionSource<bool>? ready;
@@ -52,12 +52,13 @@ public sealed partial class AChatSession(ChatOptions options) : IAsyncDisposable
                 Fault("В настройках приложения указан неверный адрес защищённого соединения.");
                 return false;
             }
-            socket = new ClientWebSocket();
+            var current = new ClientWebSocket();
+            socket = current;
             lifetime = new CancellationTokenSource();
             ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
             Phase = ConnectionPhase.Connecting;
             Notify();
-            receiveTask = RunAsync(socket, uri, generation, lifetime.Token, ready);
+            receiveTask = RunAsync(current, uri, generation, lifetime.Token, ready);
             return await ready.Task;
         }
         finally { connectGate.Release(); }
@@ -190,7 +191,7 @@ public sealed partial class AChatSession(ChatOptions options) : IAsyncDisposable
         }
     }
 
-    private async Task HandlePacketAsync(byte[] bytes, ClientWebSocket current, CancellationToken token)
+    private async Task HandlePacketAsync(byte[] bytes, WebSocket current, CancellationToken token)
     {
         var reader = new PacketReader(bytes);
         ushort id = reader.UInt16();
@@ -266,11 +267,33 @@ public sealed partial class AChatSession(ChatOptions options) : IAsyncDisposable
                 Notify();
                 return;
             case 1002:
-                // Java automatically sends the list after login/registration.
-                // Consume it correctly; chat functionality is intentionally outside this release.
                 if (!IsAuthenticated) throw new InvalidDataException("Chats before authentication.");
+                var chatSnapshot = ChatData.ReadChats(reader.String32());
+                reader.Finish();
+                ApplyChats(chatSnapshot);
+                return;
+            case 1004:
+                if (!IsAuthenticated) throw new InvalidDataException("History before authentication.");
+                var historySnapshot = ChatData.ReadHistory(reader.String32());
+                reader.Finish();
+                ApplyHistory(historySnapshot);
+                return;
+            case 2001:
+                if (!IsAuthenticated) throw new InvalidDataException("Message before authentication.");
+                var incoming = ChatData.ReadNewMessage(reader.String32());
+                reader.Finish();
+                ApplyNewMessage(incoming.ChatId, incoming.Message);
+                return;
+            case 2860:
+                if (!IsAuthenticated) throw new InvalidDataException("Chat before authentication.");
+                // Request the authoritative list instead of caching a second profile format.
                 reader.SkipString32();
                 reader.Finish();
+                _ = RefreshChatsAsync();
+                return;
+            case 2703:
+                if (!IsAuthenticated) throw new InvalidDataException("File before authentication.");
+                ReceiveDownload(reader);
                 return;
             case 200:
                 string kickReason = reader.String16();
@@ -287,6 +310,7 @@ public sealed partial class AChatSession(ChatOptions options) : IAsyncDisposable
     {
         if (uid == 0) throw new InvalidDataException("Invalid account id.");
         ResetProfileState();
+        ResetChatState();
         User = new ChatUser(uid, requestedLogin, requestedLogin);
         Phase = ConnectionPhase.Authenticated;
         Error = null;
@@ -302,7 +326,7 @@ public sealed partial class AChatSession(ChatOptions options) : IAsyncDisposable
         Notify();
     }
 
-    private async Task SendAsync(ClientWebSocket target, byte[] bytes, CancellationToken token)
+    private async Task SendAsync(WebSocket target, byte[] bytes, CancellationToken token)
     {
         await sendGate.WaitAsync(token);
         try { await target.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Binary, true, token); }
@@ -312,6 +336,7 @@ public sealed partial class AChatSession(ChatOptions options) : IAsyncDisposable
     private void Fault(string message)
     {
         CancelProfileOperations();
+        ResetChatState();
         Phase = ConnectionPhase.Error;
         User = null;
         AvatarDataUrl = null;
@@ -324,6 +349,7 @@ public sealed partial class AChatSession(ChatOptions options) : IAsyncDisposable
     {
         generation++;
         ResetProfileState();
+        ResetChatState();
         ready?.TrySetResult(false);
         authentication?.TrySetResult(false);
         lifetime?.Cancel();

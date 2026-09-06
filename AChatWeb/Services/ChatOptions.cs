@@ -6,6 +6,8 @@ public sealed record ChatOptions
     public int HandshakeTimeoutSeconds { get; init; } = 15;
     public int AuthenticationTimeoutSeconds { get; init; } = 20;
     public int ProfileTimeoutSeconds { get; init; } = 15;
+    public int HistoryTimeoutSeconds { get; init; } = 30;
+    public int DownloadTimeoutSeconds { get; init; } = 60;
     public int MaximumMessageBytes { get; init; } = 64 * 1024 * 1024;
 }
 

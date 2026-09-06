@@ -59,7 +59,6 @@
                             @if (showPrivacy)
                             {
                                 <div class="editor-heading"><h2>Настройки приватности</h2><p>Выберите, с кем делиться информацией.</p></div>
-                                <div class="privacy-notice" role="note"><Icon Name="alert" /><p>В текущей версии сервера «Только я» может оставлять доступ друзьям. Остальные ограничения тоже зависят от серверных проверок.</p></div>
                                 <fieldset disabled="@Busy" class="privacy-fields">
                                     @foreach (var option in PrivacyCatalog.Options)
                                     {
