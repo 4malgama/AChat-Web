@@ -1,0 +1,52 @@
+@page "/chats"
+@implements IDisposable
+@inject AChatSession Session
+@inject NavigationManager Navigation
+
+<PageTitle>Чаты — AChat</PageTitle>
+
+@if (Session.IsAuthenticated && Session.User is { } user)
+{
+    <section class="chat-shell" aria-label="Чаты">
+        <aside class="chat-sidebar">
+            <div class="sidebar-title"><h1>Чаты</h1><span class="section-marker"></span></div>
+            <div class="sidebar-placeholder"><Icon Name="message" /><p>Здесь будут<br />ваши разговоры</p></div>
+            <div class="account-bar">
+                <span class="avatar">@user.Initial</span>
+                <div class="account-name"><strong>@user.DisplayName</strong><span>@("@" + user.Login)</span></div>
+                <button class="icon-button" type="button" aria-label="Выйти из аккаунта" title="Выйти из аккаунта" @onclick="Logout"><Icon Name="logout" /></button>
+            </div>
+        </aside>
+        <div class="chat-welcome">
+            <div class="workspace-eyebrow"><span class="small-dot"></span> ВАШЕ ПРОСТРАНСТВО</div>
+            <div class="chat-empty-state">
+                <div class="success-illustration" aria-hidden="true"><Icon Name="message" /><span><Icon Name="check" /></span></div>
+                <div class="eyebrow">С ПОДКЛЮЧЕНИЕМ</div>
+                <h2>Вы в AChat<span>.</span></h2>
+                <p>Рады видеть вас, <strong>@user.DisplayName</strong>.</p>
+                <p class="empty-description">Аккаунт подключён. Переписка появится здесь в следующем обновлении.</p>
+                <div class="account-confirmation"><span class="status-dot"></span> Вход выполнен <span class="confirmation-divider">/</span> <span>@("@" + user.Login)</span></div>
+            </div>
+            <div class="workspace-footer"><Icon Name="shield" /> Соединение защищено</div>
+        </div>
+    </section>
+    <footer class="page-footer"><span>AChat Web</span><span>На связи с теми, кто важен.</span></footer>
+}
+
+@code {
+    private bool disposed;
+    protected override void OnInitialized() => Session.Changed += OnChanged;
+    protected override Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!Session.IsAuthenticated) Navigation.NavigateTo("/login", replace: true);
+        return Task.CompletedTask;
+    }
+    private async Task Logout() { await Session.LogoutAsync(); Navigation.NavigateTo("/login", replace: true); }
+    private void OnChanged() => _ = InvokeAsync(() =>
+    {
+        if (disposed) return;
+        if (!Session.IsAuthenticated) Navigation.NavigateTo("/login", replace: true);
+        else StateHasChanged();
+    });
+    public void Dispose() { disposed = true; Session.Changed -= OnChanged; }
+}

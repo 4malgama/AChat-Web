@@ -1,0 +1,12 @@
+@implements IDisposable
+@inject AChatSession Session
+
+<div class="connection-badge @(Session.IsOnline ? "online" : Session.IsBusy ? "connecting" : "offline")" role="status" aria-live="polite">
+    <span class="status-dot"></span><span>@Session.ConnectionLabel</span>
+</div>
+
+@code {
+    protected override void OnInitialized() => Session.Changed += OnChanged;
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+    public void Dispose() => Session.Changed -= OnChanged;
+}

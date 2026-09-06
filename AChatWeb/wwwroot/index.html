@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f4f8fb" />
+    <meta name="description" content="AChat — ваше пространство для общения. Войдите или создайте аккаунт." />
+    <title>AChat — на связи</title>
+    <base href="/" />
+    <link rel="preload" id="webassembly" />
+    <link rel="stylesheet" href="css/app.css" />
+    <link rel="icon" type="image/svg+xml" href="icon.svg" />
+    <script type="importmap"></script>
+</head>
+<body>
+    <div id="app">
+        <div class="boot-screen" role="status" aria-live="polite">
+            <div class="boot-brand">AChat<span>.</span></div>
+            <div class="boot-track"><span></span></div>
+            <p>Готовим ваше пространство…</p>
+        </div>
+    </div>
+    <noscript>Для работы AChat включите JavaScript в браузере.</noscript>
+    <div id="blazor-error-ui" role="alert">
+        Не удалось продолжить работу приложения.
+        <a href="." class="reload">Перезагрузить</a>
+    </div>
+    <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
+</body>
+</html>
