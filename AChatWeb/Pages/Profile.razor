@@ -1,0 +1,200 @@
+@page "/profile"
+@implements IDisposable
+@inject AChatSession Session
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>Личный профиль — AChat</PageTitle>
+<NavigationLock OnBeforeInternalNavigation="BeforeNavigation" ConfirmExternalNavigation="@IsDirty" />
+
+@if (Session.IsAuthenticated && Session.User is { } user)
+{
+    <section class="chat-shell profile-shell" aria-labelledby="profile-title">
+        <ChatSidebar />
+        <div class="profile-workspace">
+            <header class="profile-header">
+                <div><a class="back-link" href="/chats"><Icon Name="back" /> К чатам</a><h1 id="profile-title">Личный профиль</h1></div>
+                @if (draft is not null)
+                {
+                    <button type="button" class="secondary-button privacy-button @(showPrivacy ? "selected" : "")" @onclick="TogglePrivacy" aria-expanded="@showPrivacy.ToString().ToLowerInvariant()" aria-controls="profile-fields"><Icon Name="shield" /> @(showPrivacy ? "Основные данные" : "Приватность")</button>
+                }
+            </header>
+            @if (draft is null)
+            {
+                <div class="profile-loading" role="status">
+                    @if (Session.ProfileError is { } loadingError)
+                    {
+                        <Icon Name="alert" /><p>@loadingError</p>
+                    }
+                    else { <span class="spinner"></span><p>Загружаем ваш профиль…</p> }
+                </div>
+            }
+            else
+            {
+                <div class="profile-grid">
+                    <aside class="profile-summary">
+                        <div class="profile-photo-wrap">
+                            <AvatarView Class="profile-avatar" Source="@(previewAvatar ?? Session.AvatarDataUrl)" Name="@(draft.FullName.Length > 0 ? draft.FullName : user.Login)" />
+                            @if (uploading) { <span class="photo-progress"><span class="spinner"></span></span> }
+                        </div>
+                        <strong class="profile-summary-name">@(draft.FullName.Length > 0 ? draft.FullName : user.Login)</strong>
+                        <span class="profile-handle">@("@" + user.Login)</span>
+                        @if (!string.IsNullOrWhiteSpace(draft.Post)) { <p class="profile-summary-post">@draft.Post</p> }
+                        <label class="upload-label secondary-button @(Busy ? "disabled" : "")">
+                            <Icon Name="camera" /><span>@(uploading ? "Загружаем…" : "Изменить фото")</span>
+                            <InputFile @key="avatarInputVersion" OnChange="UploadAvatar" accept="image/jpeg,image/png,image/webp" disabled="@Busy" aria-label="Выбрать фотографию профиля" />
+                        </label>
+                        <p class="photo-hint">JPG, PNG или WebP, до 5 МБ.<br />Фото сохраняется отдельно.</p>
+                        @if (avatarMessage is not null || Session.AvatarError is not null)
+                        {
+                            <p class="photo-message @((avatarMessage is not null ? avatarFailed : Session.AvatarError is not null) ? "error" : "success")" role="status">@(avatarMessage ?? Session.AvatarError)</p>
+                        }
+                        <div class="profile-summary-rule"></div>
+                        <span class="summary-label">О СЕБЕ</span>
+                        <p class="profile-summary-description">@(string.IsNullOrWhiteSpace(draft.Description) ? "Расскажите немного о себе — описание появится здесь." : draft.Description)</p>
+                    </aside>
+
+                    <form class="profile-editor" @onsubmit="Save" @onsubmit:preventDefault="true">
+                        <div id="profile-fields">
+                            @if (showPrivacy)
+                            {
+                                <div class="editor-heading"><h2>Настройки приватности</h2><p>Выберите, с кем делиться информацией.</p></div>
+                                <div class="privacy-notice" role="note"><Icon Name="alert" /><p>В текущей версии сервера «Только я» может оставлять доступ друзьям. Остальные ограничения тоже зависят от серверных проверок.</p></div>
+                                <fieldset disabled="@Busy" class="privacy-fields">
+                                    @foreach (var option in PrivacyCatalog.Options)
+                                    {
+                                        var selected = draft.Privacy.GetValueOrDefault(option.Key);
+                                        <div class="privacy-row" @key="option.Key">
+                                            <label for="@("privacy-" + option.Key)">@option.Label</label>
+                                            <select id="@("privacy-" + option.Key)" value="@selected" @onchange="e => SetPrivacy(option.Key, e.Value?.ToString())">
+                                                @if (!option.Choices.Any(c => c.Value == selected))
+                                                { <option value="@(selected ?? "")" disabled>Не задано сервером</option> }
+                                                @foreach (var choice in option.Choices) { <option value="@choice.Value">@choice.Label</option> }
+                                            </select>
+                                        </div>
+                                    }
+                                    <div class="field-group display-name-field"><label for="display-name">Отображаемое имя</label><input class="profile-input" id="display-name" @bind="draft.DisplayName" @bind:event="oninput" maxlength="100" placeholder="По умолчанию — ваше ФИО" /><p class="field-hint">Можно оставить пустым.</p></div>
+                                </fieldset>
+                            }
+                            else
+                            {
+                                <div class="editor-heading"><h2>Основные данные</h2><p>Так вас будет проще узнать.</p></div>
+                                <fieldset disabled="@Busy" class="personal-fields">
+                                    <div class="field-group"><label for="surname">Фамилия</label><input class="profile-input" id="surname" name="family-name" autocomplete="family-name" @bind="draft.SurName" @bind:event="oninput" maxlength="100" placeholder="Ваша фамилия" /></div>
+                                    <div class="name-grid">
+                                        <div class="field-group"><label for="first-name">Имя</label><input class="profile-input" id="first-name" name="given-name" autocomplete="given-name" @bind="draft.FirstName" @bind:event="oninput" maxlength="100" placeholder="Ваше имя" /></div>
+                                        <div class="field-group"><label for="patronymic">Отчество</label><input class="profile-input" id="patronymic" name="additional-name" autocomplete="additional-name" @bind="draft.Patronymic" @bind:event="oninput" maxlength="100" placeholder="Если есть" /></div>
+                                    </div>
+                                    <div class="field-group"><label for="post">Должность</label><input class="profile-input" id="post" name="organization-title" autocomplete="organization-title" @bind="draft.Post" @bind:event="oninput" maxlength="200" placeholder="Чем вы занимаетесь" /></div>
+                                    <div class="field-group"><div class="label-with-count"><label for="description">Описание</label><span aria-hidden="true">@draft.Description.Length / 255</span></div><textarea class="profile-input profile-description" id="description" @bind="draft.Description" @bind:event="oninput" maxlength="255" rows="5" placeholder="Пара слов о вас, ваших интересах или работе"></textarea></div>
+                                </fieldset>
+                            }
+                        </div>
+                        @if ((formError ?? Session.ProfileError) is { } error)
+                        {
+                            <div class="form-alert" role="alert"><Icon Name="alert" /><span>@(formError ?? Session.ProfileError)</span></div>
+                        }
+                        <div class="profile-save-bar">
+                            <span class="save-state @(saved && !IsDirty ? "saved" : "")" role="status">@(saving ? "Ждём подтверждения…" : IsDirty ? "Есть несохранённые изменения" : saved ? "Изменения сохранены" : "Всё актуально")</span>
+                            <div class="save-actions">
+                                <button type="button" class="text-button" disabled="@(Busy || !IsDirty)" @onclick="Reset">Отменить</button>
+                                <button type="submit" class="primary-button" disabled="@(Busy || !IsDirty)">@if (saving) { <span class="spinner"></span> } else { <Icon Name="save" /> } <span>@(saving ? "Сохраняем…" : "Сохранить")</span></button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            }
+        </div>
+    </section>
+    <footer class="page-footer"><span>AChat Web</span><span>Ваш профиль. Ваши настройки.</span></footer>
+}
+
+@code {
+    private int avatarInputVersion;
+    private ProfileDraft? draft;
+    private ChatUser? baseline;
+    private bool showPrivacy, saving, uploading, saved, disposed, avatarFailed;
+    private string? formError, avatarMessage, previewAvatar;
+    private readonly CancellationTokenSource pageLifetime = new();
+    private bool Busy => saving || uploading || Session.IsUpdatingProfile || Session.IsUpdatingAvatar;
+    private bool IsDirty => draft is not null && baseline is not null && !draft.ChangesFrom(baseline).IsEmpty;
+
+    protected override void OnInitialized() { Session.Changed += OnChanged; LoadIfReady(); }
+    private void LoadIfReady()
+    {
+        if (Session.User is { ProfileLoaded: true } user && draft is null)
+        { baseline = user; draft = ProfileDraft.FromUser(user); }
+    }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!Session.IsAuthenticated) { Navigation.NavigateTo("/login", replace: true); return; }
+        if (firstRender && draft is null)
+        {
+            try { await Session.WaitForProfileAsync(pageLifetime.Token); }
+            catch (OperationCanceledException) { }
+            if (!disposed) { LoadIfReady(); StateHasChanged(); }
+        }
+    }
+    private void TogglePrivacy() => showPrivacy = !showPrivacy;
+    private void SetPrivacy(string key, string? value) { if (draft is not null) draft.Privacy[key] = value; }
+    private void Reset()
+    {
+        if (Session.User is not { ProfileLoaded: true } user) return;
+        baseline = user; draft = ProfileDraft.FromUser(user); formError = null; saved = false; Session.ClearProfileError();
+    }
+    private async Task Save()
+    {
+        if (Busy || draft is null || baseline is null || !IsDirty) return;
+        formError = draft.Validate(baseline);
+        if (formError is not null) return;
+        saving = true; saved = false;
+        try
+        {
+            bool success = await Session.UpdateProfileAsync(draft, baseline);
+            if (success && !disposed && Session.User is { ProfileLoaded: true } user)
+            { baseline = user; draft = ProfileDraft.FromUser(user); saved = true; }
+        }
+        finally { saving = false; }
+    }
+    private async Task UploadAvatar(InputFileChangeEventArgs args)
+    {
+        if (Busy) return;
+        uploading = true; avatarMessage = null; avatarFailed = true;
+        try
+        {
+            var file = args.File;
+            if (file.Size > 5 * 1024 * 1024) { avatarMessage = "Выберите фотографию размером до 5 МБ."; return; }
+            if (file.ContentType is not ("image/jpeg" or "image/png" or "image/webp"))
+            { avatarMessage = "Поддерживаются JPG, PNG и WebP."; return; }
+            var resized = await file.RequestImageFileAsync("image/jpeg", 512, 512);
+            using var buffer = new MemoryStream();
+            await using (var stream = resized.OpenReadStream(AvatarImage.MaximumUploadBytes, pageLifetime.Token))
+                await stream.CopyToAsync(buffer, pageLifetime.Token);
+            byte[] bytes = buffer.ToArray();
+            if (AvatarImage.MimeType(bytes) != "image/jpeg") { avatarMessage = "Не удалось прочитать фотографию."; return; }
+            previewAvatar = AvatarImage.DataUrl(bytes);
+            bool success = await Session.UpdateAvatarAsync(bytes);
+            if (!disposed) { avatarFailed = !success; avatarMessage = success ? "Фотография сохранена" : Session.AvatarError ?? "Фотография не сохранена."; }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception e) when (e is IOException or JSException or InvalidOperationException)
+        { if (!disposed) avatarMessage = "Не удалось обработать изображение. Выберите другой файл."; }
+        finally { uploading = false; previewAvatar = null; avatarInputVersion++; }
+    }
+    private async Task BeforeNavigation(LocationChangingContext context)
+    {
+        if (Session.IsAuthenticated && IsDirty && !await JS.InvokeAsync<bool>("confirm", "Уйти из профиля и потерять несохранённые изменения?"))
+            context.PreventNavigation();
+    }
+    private void OnChanged() => _ = InvokeAsync(() =>
+    {
+        if (disposed) return;
+        if (!Session.IsAuthenticated) { draft = null; baseline = null; Navigation.NavigateTo("/login", replace: true); }
+        else { LoadIfReady(); StateHasChanged(); }
+    });
+    public void Dispose()
+    {
+        disposed = true; Session.Changed -= OnChanged;
+        pageLifetime.Cancel(); pageLifetime.Dispose();
+    }
+}
