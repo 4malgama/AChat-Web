@@ -7,6 +7,31 @@ public static class PacketWriter
 {
     private static readonly Encoding Utf16 = new UnicodeEncoding(true, false, true);
 
+    public static byte[] UpdateProfile(string json) => String16Packet(501, json);
+    public static byte[] RequestAvatar() => String16Packet(1000, "");
+
+    private static byte[] String16Packet(ushort id, string text)
+    {
+        if (text.Length > short.MaxValue) throw new ArgumentException("String is too long for Java readShort().");
+        byte[] data = new byte[4 + text.Length * 2];
+        BinaryPrimitives.WriteUInt16BigEndian(data, id);
+        BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(2), (ushort)text.Length);
+        Utf16.GetBytes(text, data.AsSpan(4));
+        return data;
+    }
+
+    public static byte[] UpdateAvatar(byte[] image)
+    {
+        if (image.Length is 0 or > AChatWeb.Services.AvatarImage.MaximumUploadBytes)
+            throw new ArgumentException("Invalid avatar size.");
+        string text = Convert.ToBase64String(image);
+        byte[] data = new byte[6 + text.Length * 2];
+        BinaryPrimitives.WriteUInt16BigEndian(data, 1001);
+        BinaryPrimitives.WriteInt32BigEndian(data.AsSpan(2), text.Length);
+        Utf16.GetBytes(text, data.AsSpan(6));
+        return data;
+    }
+
     public static byte[] Empty(ushort id)
     {
         byte[] data = new byte[2];

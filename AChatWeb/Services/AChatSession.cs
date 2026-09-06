@@ -5,7 +5,7 @@ using AChatWeb.Protocol;
 namespace AChatWeb.Services;
 
 /// <summary>One connection per browser tab. Credentials are never written to storage or logs.</summary>
-public sealed class AChatSession(ChatOptions options) : IAsyncDisposable
+public sealed partial class AChatSession(ChatOptions options) : IAsyncDisposable
 {
     private ClientWebSocket? socket;
     private CancellationTokenSource? lifetime;
@@ -242,23 +242,32 @@ public sealed class AChatSession(ChatOptions options) : IAsyncDisposable
                 if (!IsAuthenticated) throw new InvalidDataException("Profile before authentication.");
                 string json = reader.String16();
                 reader.Finish();
-                using (var document = JsonDocument.Parse(json))
+                bool firstProfile = !User!.ProfileLoaded;
+                User = ProfileData.Read(json, User);
+                profileAvailable.TrySetResult(true);
+                if (pendingProfile is { } pending && pending.Changes.Matches(User))
+                    pending.Completion.TrySetResult(true);
+                Notify();
+                if (firstProfile) await SendAsync(current, PacketWriter.RequestAvatar(), token);
+                return;
+            case 1001:
+                if (!IsAuthenticated) throw new InvalidDataException("Avatar before authentication.");
+                byte[] avatar = reader.Rest(AvatarImage.MaximumReceiveBytes);
+                reader.Finish();
+                string? url = AvatarImage.DataUrl(avatar);
+                if (url is not null)
                 {
-                    if (document.RootElement.TryGetProperty("profile_info", out var profile))
-                    {
-                        static string Read(JsonElement parent, string key) =>
-                            parent.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String
-                                ? value.GetString() ?? "" : "";
-                        string login = Read(profile, "login");
-                        if (string.IsNullOrWhiteSpace(login)) login = User!.Login;
-                        string name = string.Join(" ", new[] { Read(profile, "first_name"), Read(profile, "sur_name") }
-                            .Where(s => !string.IsNullOrWhiteSpace(s)));
-                        User = User! with { Login = login, DisplayName = name.Length > 0 ? name : login, Post = Read(profile, "post") };
-                        Notify();
-                    }
+                    AvatarDataUrl = url;
+                    AvatarError = null;
+                    if (pendingAvatar is { } upload && avatar.AsSpan().SequenceEqual(upload.Bytes))
+                        upload.Completion.TrySetResult(true);
                 }
+                else AvatarError = "Сервер прислал изображение в неподдерживаемом формате.";
+                Notify();
                 return;
             case 1002:
+                // Java automatically sends the list after login/registration.
+                // Consume it correctly; chat functionality is intentionally outside this release.
                 if (!IsAuthenticated) throw new InvalidDataException("Chats before authentication.");
                 reader.SkipString32();
                 reader.Finish();
@@ -277,6 +286,7 @@ public sealed class AChatSession(ChatOptions options) : IAsyncDisposable
     private void Accept(ulong uid)
     {
         if (uid == 0) throw new InvalidDataException("Invalid account id.");
+        ResetProfileState();
         User = new ChatUser(uid, requestedLogin, requestedLogin);
         Phase = ConnectionPhase.Authenticated;
         Error = null;
@@ -301,8 +311,10 @@ public sealed class AChatSession(ChatOptions options) : IAsyncDisposable
 
     private void Fault(string message)
     {
+        CancelProfileOperations();
         Phase = ConnectionPhase.Error;
         User = null;
+        AvatarDataUrl = null;
         Error = message;
         authentication?.TrySetResult(false);
         Notify();
@@ -311,6 +323,7 @@ public sealed class AChatSession(ChatOptions options) : IAsyncDisposable
     private async Task StopAsync()
     {
         generation++;
+        ResetProfileState();
         ready?.TrySetResult(false);
         authentication?.TrySetResult(false);
         lifetime?.Cancel();

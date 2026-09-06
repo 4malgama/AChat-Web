@@ -9,6 +9,11 @@ public sealed class PacketReader(ReadOnlyMemory<byte> bytes)
     private int offset;
     private static readonly Encoding Utf16 = new UnicodeEncoding(true, false, true);
     public int Remaining => bytes.Length - offset;
+    public byte[] Rest(int maximumBytes)
+    {
+        if (Remaining > maximumBytes) throw new InvalidDataException("Payload exceeds the limit.");
+        return Take(Remaining).ToArray();
+    }
 
     private ReadOnlySpan<byte> Take(int count)
     {

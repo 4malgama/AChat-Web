@@ -1,0 +1,18 @@
+<span class="avatar @Class">
+    @if (!string.IsNullOrWhiteSpace(Source) && Source != failedSource)
+    {
+        <img src="@Source" alt="@($"Фотография: {Name}")" @onerror="() => failedSource = Source" />
+    }
+    else
+    {
+        <span aria-hidden="true">@Initial</span>
+    }
+</span>
+
+@code {
+    [Parameter] public string? Source { get; set; }
+    [Parameter] public string Name { get; set; } = "";
+    [Parameter] public string? Class { get; set; }
+    private string? failedSource;
+    private string Initial => string.IsNullOrWhiteSpace(Name) ? "A" : System.Globalization.StringInfo.GetNextTextElement(Name).ToUpperInvariant();
+}

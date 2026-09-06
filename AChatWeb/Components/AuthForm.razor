@@ -1,0 +1,136 @@
+@implements IDisposable
+@inject AChatSession Session
+@inject NavigationManager Navigation
+
+<PageTitle>@(isRegistration ? "Регистрация" : "Вход") — AChat</PageTitle>
+
+<section class="auth-card" aria-labelledby="auth-title">
+    <aside class="welcome-panel">
+        <div class="welcome-top"><span class="small-dot"></span> ПРОСТРАНСТВО ДЛЯ ОБЩЕНИЯ</div>
+        <div class="welcome-copy">
+            <h1>Ближе. <br />Даже на <br /><span>расстоянии.</span></h1>
+            <p>Ваши люди. Ваши разговоры.<br />Одно место, чтобы быть на связи.</p>
+        </div>
+        <div class="welcome-art" aria-hidden="true">
+            <div class="orbit orbit-one"></div><div class="orbit orbit-two"></div>
+            <div class="bubble bubble-white"><Icon Name="message" /></div>
+            <div class="bubble bubble-green"><Icon Name="check" /></div>
+            <span class="art-dot dot-one"></span><span class="art-dot dot-two"></span>
+        </div>
+        <div class="welcome-bottom"><span class="small-dot"></span> МЕНЬШЕ РАССТОЯНИЙ. БОЛЬШЕ ОБЩЕНИЯ.</div>
+    </aside>
+
+    <div class="auth-form-panel">
+        <nav class="auth-tabs" aria-label="Вход и регистрация">
+            <a href="/login" class="@(!isRegistration ? "active" : "")" aria-current="@(!isRegistration ? "page" : null)">Вход</a>
+            <a href="/register" class="@(isRegistration ? "active" : "")" aria-current="@(isRegistration ? "page" : null)">Регистрация</a>
+        </nav>
+        <div class="form-heading">
+            <div class="eyebrow">@(isRegistration ? "НАЧНЁМ ЗНАКОМСТВО" : "РАДЫ ВАС ВИДЕТЬ")</div>
+            <h2 id="auth-title">@(isRegistration ? "Ваш новый AChat" : "С возвращением!")</h2>
+            <p>@(isRegistration ? "Создайте аккаунт — и будьте ближе к своим." : "Войдите, чтобы вернуться к общению.")</p>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(formError ?? Session.Error))
+        {
+            <div class="form-alert" role="alert">
+                <Icon Name="alert" />
+                <div><span>@(formError ?? Session.Error)</span>
+                    @if (Session.Phase is ConnectionPhase.Error or ConnectionPhase.Offline)
+                    {
+                        <button class="text-button retry-button" type="button" @onclick="Reconnect" disabled="@Session.IsBusy"><Icon Name="refresh" /> Подключиться ещё раз</button>
+                    }
+                </div>
+            </div>
+        }
+
+        <form @onsubmit="Submit" @onsubmit:preventDefault="true">
+            <div class="field-group">
+                <label for="login">Логин</label>
+                <div class="input-wrap"><Icon Name="user" />
+                    <input id="login" name="username" type="text" @bind="login" @bind:event="oninput" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Ваш логин" maxlength="100" required disabled="@submitting" />
+                </div>
+            </div>
+            <div class="field-group">
+                <label for="password">Пароль</label>
+                <div class="input-wrap"><Icon Name="lock" />
+                    <input id="password" name="password" type="@(showPassword ? "text" : "password")" @bind="password" @bind:event="oninput" autocomplete="@(isRegistration ? "new-password" : "current-password")" placeholder="@(isRegistration ? "Придумайте пароль" : "Введите пароль")" maxlength="256" required disabled="@submitting" aria-describedby="@(isRegistration ? "password-help" : null)" />
+                    <button class="icon-button password-toggle" type="button" aria-label="@(showPassword ? "Скрыть пароль" : "Показать пароль")" aria-pressed="@showPassword.ToString().ToLowerInvariant()" @onclick="() => showPassword = !showPassword"><Icon Name="@(showPassword ? "eye-off" : "eye")" /></button>
+                </div>
+                @if (isRegistration) { <p id="password-help" class="field-hint">От 8 символов: строчная и заглавная латинские буквы, цифра.</p> }
+            </div>
+            @if (isRegistration)
+            {
+                <div class="field-group">
+                    <label for="confirmation">Повторите пароль</label>
+                    <div class="input-wrap"><Icon Name="lock" />
+                        <input id="confirmation" name="password-confirmation" type="@(showPassword ? "text" : "password")" @bind="confirmation" @bind:event="oninput" autocomplete="new-password" placeholder="Ещё раз, чтобы не ошибиться" maxlength="256" required disabled="@submitting" />
+                    </div>
+                </div>
+            }
+
+            <button class="primary-button" type="submit" disabled="@(!Session.CanAuthenticate || submitting)">
+                @if (submitting || Session.IsBusy) { <span class="spinner" aria-hidden="true"></span> }
+                <span>@(submitting ? (isRegistration ? "Создаём аккаунт…" : "Входим…") : Session.IsBusy ? "Подключаемся…" : isRegistration ? "Создать аккаунт" : "Войти в AChat")</span>
+                @if (!submitting && !Session.IsBusy) { <Icon Name="arrow" /> }
+            </button>
+        </form>
+        <div class="auth-switch">
+            @(isRegistration ? "Уже есть аккаунт?" : "Впервые здесь?")
+            <a href="@(isRegistration ? "/login" : "/register")">@(isRegistration ? "Войти" : "Создать аккаунт")</a>
+        </div>
+        <div class="security-note"><Icon Name="shield" /><span>Защищённое соединение с сервером</span></div>
+    </div>
+</section>
+<footer class="page-footer"><span>AChat Web</span><span>Общение начинается с вас.</span></footer>
+
+@code {
+    [Parameter] public bool IsRegistration { get; set; }
+    private bool isRegistration => IsRegistration;
+    private bool showPassword, submitting, disposed;
+    private string login = "", password = "", confirmation = "";
+    private string? formError;
+
+    protected override void OnInitialized() => Session.Changed += OnSessionChanged;
+    protected override void OnParametersSet()
+    {
+        password = confirmation = "";
+        showPassword = false;
+        formError = null;
+        Session.ClearFormError();
+    }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (Session.IsAuthenticated) Navigation.NavigateTo("/chats", replace: true);
+        else await Session.ConnectAsync();
+    }
+    private async Task Reconnect() { formError = null; await Session.ConnectAsync(); }
+    private async Task Submit()
+    {
+        if (submitting || !Session.CanAuthenticate) return;
+        formError = isRegistration ? RegistrationRules.Validate(login.Trim(), password, confirmation)
+            : string.IsNullOrWhiteSpace(login) || password.Length == 0 ? "Введите логин и пароль." : null;
+        if (formError is not null) return;
+        submitting = true;
+        try
+        {
+            bool success = await Session.AuthenticateAsync(isRegistration, login, password);
+            password = confirmation = "";
+            if (success && !disposed) Navigation.NavigateTo("/chats", replace: true);
+        }
+        finally { submitting = false; }
+    }
+    private void OnSessionChanged() => _ = InvokeAsync(() =>
+    {
+        if (disposed) return;
+        if (Session.IsAuthenticated) Navigation.NavigateTo("/chats", replace: true);
+        else StateHasChanged();
+    });
+    public void Dispose()
+    {
+        disposed = true;
+        password = confirmation = "";
+        Session.Changed -= OnSessionChanged;
+    }
+}
