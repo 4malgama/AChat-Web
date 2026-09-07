@@ -26,6 +26,21 @@ public sealed class PacketReader(ReadOnlyMemory<byte> bytes)
 
     public ushort UInt16() => BinaryPrimitives.ReadUInt16BigEndian(Take(2));
     public ulong UInt64() => BinaryPrimitives.ReadUInt64BigEndian(Take(8));
+    public uint UInt32() => BinaryPrimitives.ReadUInt32BigEndian(Take(4));
+    public byte[] Bytes32(int maximumBytes)
+    {
+        uint count = UInt32();
+        if (count > maximumBytes) throw new InvalidDataException("File exceeds the limit.");
+        return Take(checked((int)count)).ToArray();
+    }
+
+    public string String32(int maxChars = 32 * 1024 * 1024)
+    {
+        uint count = UInt32();
+        if (count > maxChars || count > (uint)(Remaining / 2))
+            throw new InvalidDataException("Invalid long string length.");
+        return Utf16.GetString(Take(checked((int)count * 2)));
+    }
     public bool Boolean() => Take(1)[0] switch
     {
         0 => false,

@@ -7,6 +7,10 @@
     [Parameter] public string? Class { get; set; }
     private string[] Paths => Name switch
     {
+        "search" => ["M16 10a6 6 0 1 1-12 0 6 6 0 0 1 12 0", "m15 15 6 6"],
+        "file" => ["M14 2H5v20h14V7z", "M14 2v5h5", "M8 12h8", "M8 16h5"],
+        "download" => ["M12 3v12", "m7 10 5 5 5-5", "M4 16v5h16v-5"],
+        "down" => ["M12 4v16", "m6 14 6 6 6-6"],
         "camera" => ["M4 7h4l2-3h4l2 3h4v14H4z", "M16 13a4 4 0 1 1-8 0 4 4 0 0 1 8 0"],
         "back" => ["M19 12H5", "m11 6-6 6 6 6"],
         "save" => ["m5 12 4 4L19 6"],

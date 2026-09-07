@@ -1,0 +1,58 @@
+@inject AChatSession Session
+@inject BrowserFileDownloads Downloads
+
+@{ var state = Session.DownloadProgress(File.Id); }
+<div class="attachment-card">
+    <button class="attachment-download" type="button"
+            disabled="@(saving || state.IsLoading || Session.DownloadSlotsFull)"
+            @onclick="Download" title="@($"Скачать {File.Name}")"
+            aria-label="@($"Скачать {File.Name}, {File.SizeLabel}")">
+        <span class="attachment-symbol"><Icon Name="file" /></span>
+        <span class="attachment-details"><strong dir="auto">@File.Name</strong><span>@File.SizeLabel</span></span>
+        <span class="attachment-action">
+            @if (saving || state.IsLoading)
+            {
+                <span class="spinner" aria-hidden="true"></span><span>Загрузка…</span>
+            }
+            else
+            {
+                <Icon Name="download" /><span>Скачать</span>
+            }
+        </span>
+    </button>
+    @if (state.Error is { } error)
+    {
+        <p class="attachment-error" role="alert">@error</p>
+    }
+    else if (state.Info is { } info)
+    {
+        <p class="attachment-info" role="status">@info</p>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ChatAttachment File { get; set; } = default!;
+    [Parameter] public ulong ChatId { get; set; }
+    private bool saving;
+
+    private async Task Download()
+    {
+        if (saving) return;
+        ulong fileId = File.Id;
+        var owner = Session.User;
+        var file = await Session.DownloadAttachmentAsync(ChatId, fileId);
+        if (file is null || !Session.IsAuthenticated || Session.User?.Id != owner?.Id) return;
+        saving = true;
+        try
+        {
+            await Downloads.SaveAsync(file);
+            if (Session.User?.Id == owner?.Id) Session.MarkDownloadHandedToBrowser(fileId);
+        }
+        catch (Exception e) when (e is JSException or IOException or OperationCanceledException)
+        {
+            if (Session.User?.Id == owner?.Id)
+                Session.SetDownloadError(fileId, "Браузер не смог сохранить файл. Проверьте разрешение на скачивание и повторите попытку.");
+        }
+        finally { saving = false; }
+    }
+}

@@ -9,6 +9,32 @@ public static class PacketWriter
 
     public static byte[] UpdateProfile(string json) => String16Packet(501, json);
     public static byte[] RequestAvatar() => String16Packet(1000, "");
+    public static byte[] RequestChats() => Empty(1002);
+
+    public static byte[] RequestMessages(ulong chatId)
+    {
+        ValidateId(chatId);
+        byte[] data = new byte[10];
+        BinaryPrimitives.WriteUInt16BigEndian(data, 1003);
+        BinaryPrimitives.WriteUInt64BigEndian(data.AsSpan(2), chatId);
+        return data;
+    }
+
+    public static byte[] DownloadFile(ulong fileId, ulong requestId)
+    {
+        ValidateId(fileId);
+        ValidateId(requestId);
+        byte[] data = new byte[18];
+        BinaryPrimitives.WriteUInt16BigEndian(data, 2702);
+        BinaryPrimitives.WriteUInt64BigEndian(data.AsSpan(2), fileId);
+        BinaryPrimitives.WriteUInt64BigEndian(data.AsSpan(10), requestId);
+        return data;
+    }
+
+    private static void ValidateId(ulong id)
+    {
+        if (id == 0 || id > long.MaxValue) throw new ArgumentOutOfRangeException(nameof(id));
+    }
 
     private static byte[] String16Packet(ushort id, string text)
     {
